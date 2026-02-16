@@ -1,0 +1,127 @@
+# main.py
+import streamlit as st
+from openai import OpenAI
+from config import API_KEY, LLM_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
+from gpt_memory import GPTMemory
+from PyPDF2 import PdfReader
+
+client = OpenAI(api_key=API_KEY)
+memory = GPTMemory()
+
+st.set_page_config(page_title="RAG Chatbot", page_icon="🤖")
+st.title("RAG Chatbot with Document Upload")
+
+def split_text(text, chunk_size=500, chunk_overlap=50):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += chunk_size - chunk_overlap
+    return chunks
+
+uploaded_file = st.file_uploader("Upload PDF or TXT", type=["pdf", "txt"])
+document_text = ""
+
+if uploaded_file:
+    if uploaded_file.type == "application/pdf":
+        reader = PdfReader(uploaded_file)
+        document_text = "\n".join([p.extract_text() for p in reader.pages])
+    else:
+        document_text = uploaded_file.read().decode("utf-8")
+
+    chunks = split_text(document_text, CHUNK_SIZE, CHUNK_OVERLAP)
+    for chunk in chunks:
+        memory.add_response(chunk)
+
+    st.success("Document indexed successfully!")
+
+user_input = st.text_input("Ask a question")
+
+if user_input and document_text:
+    top_chunks = memory.retrieve_topk(user_input, TOP_K)
+    context = "\n\n---\n\n".join(top_chunks)
+
+    # 🔥 STRICT RAG PROMPT
+    prompt = f"""
+You are an AI assistant.
+
+RULES:
+- Answer ONLY from the context.
+- Do NOT use outside knowledge.
+- If answer not found, say:
+  "I don’t know based on the provided documents."
+
+Context:
+{context}
+
+Question:
+{user_input}
+"""
+
+    response = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": "You are a strict RAG assistant."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0,
+        max_tokens=300
+    )
+
+    st.write("### Answer")
+    st.write(response.choices[0].message.content)
+
+
+config
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("OPENAI_API_KEY")
+if not API_KEY:
+    raise ValueError("OpenAI API key not found! Add OPENAI_API_KEY=your_key in .env")
+
+LLM_MODEL = "gpt-4o-mini"
+EMBEDDING_MODEL = "text-embedding-3-small"
+
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 50
+TOP_K = 3
+
+
+gpt_memory
+import faiss
+import numpy as np
+from openai import OpenAI
+from config import API_KEY, EMBEDDING_MODEL
+
+client = OpenAI(api_key=API_KEY)
+
+class GPTMemory:
+    def __init__(self):
+        self.texts = []
+        self.index = faiss.IndexFlatL2(1536)
+
+    def add_response(self, text):
+        embedding = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=text
+        ).data[0].embedding
+
+        self.texts.append(text)
+        self.index.add(np.array([embedding]).astype("float32"))
+
+    def retrieve_topk(self, query, top_k=3):
+        query_embedding = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=query
+        ).data[0].embedding
+
+        D, I = self.index.search(
+            np.array([query_embedding]).astype("float32"),
+            top_k
+        )
+
+        return [self.texts[i] for i in I[0]]

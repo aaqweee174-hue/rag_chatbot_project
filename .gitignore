@@ -1,0 +1,20 @@
+# secret
+.env
+
+# virtual environment
+env/
+venv/
+.venv/
+
+# cache
+__pycache__/
+*.pyc
+
+# vector db
+*.faiss
+*.pkl
+*.index
+*.bin
+vectorstore/
+db/
+storage/
