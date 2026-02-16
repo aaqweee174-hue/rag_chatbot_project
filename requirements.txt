@@ -4,5 +4,5 @@ python-dotenv
 PyPDF2
 scikit-learn
 rank-bm25
-faiss-cpu==1.7.4
+faiss-cpu
 numpy
