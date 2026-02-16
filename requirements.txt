@@ -1,6 +1,6 @@
-streamlit
-openai
-python-dotenv
-PyPDF2
-scikit-learn
-faiss
+streamlit==1.54.0
+openai==2.21.0
+python-dotenv==1.2.1
+PyPDF2==3.0.1
+scikit-learn==1.8.0
+faiss-cpu==1.7.4
