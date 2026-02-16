@@ -38,7 +38,7 @@ st.set_page_config(
 )
 
 st.title("RAG Chatbot 2026")
-st.write("Upload a PDF/TXT document and ask questions based strictly on its content.")
+st.write("Upload a PDF/TXT document and ask questions strictly based on its content.")
 
 # ------------------------
 # Text splitter
@@ -91,15 +91,21 @@ if "history" not in st.session_state:
 # ------------------------
 # RAG Pipeline
 # ------------------------
-if user_input and document_chunks:
+if user_input:
 
     # 1️⃣ Guardrail: input validation
     valid, msg = validate_user_input(user_input)
+
     if not valid:
         st.warning(msg)
         st.stop()
+
     if msg == "GREETING":
         st.write("Hello! 👋 Please ask a question related to the uploaded document.")
+        st.stop()
+
+    if not document_chunks:
+        st.warning("Please upload a document first.")
         st.stop()
 
     # 2️⃣ Retrieve context
