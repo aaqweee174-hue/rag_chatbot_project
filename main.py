@@ -1,4 +1,3 @@
-# main.py
 import streamlit as st
 from openai import OpenAI
 from PyPDF2 import PdfReader
@@ -27,7 +26,7 @@ client = OpenAI(api_key=API_KEY)
 # ------------------------
 # Retrieval engines
 # ------------------------
-vector_memory = GPTMemory()          # Embedding + FAISS
+vector_memory = GPTMemory()          # Embedding + simple cosine similarity
 bm25_retriever = BM25Retriever()     # Keyword-based BM25
 
 # ------------------------
@@ -48,12 +47,10 @@ def split_text(text, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     chunks = []
     start = 0
     text_length = len(text)
-
     while start < text_length:
         end = min(start + chunk_size, text_length)
         chunks.append(text[start:end])
         start += chunk_size - chunk_overlap
-
     return chunks
 
 # ------------------------
@@ -69,9 +66,7 @@ document_chunks = []
 if uploaded_file is not None:
     if uploaded_file.type == "application/pdf":
         reader = PdfReader(uploaded_file)
-        text = "\n".join(
-            page.extract_text() or "" for page in reader.pages
-        )
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
     else:
         text = uploaded_file.read().decode("utf-8")
 
@@ -98,49 +93,59 @@ if "history" not in st.session_state:
 # ------------------------
 if user_input and document_chunks:
 
-    # Guardrail: input validation
-    if not validate_user_input(user_input):
-        st.warning("Invalid or unsafe question.")
+    # 1️⃣ Guardrail: input validation
+    valid, msg = validate_user_input(user_input)
+    if not valid:
+        st.warning(msg)
+        st.stop()
+    if msg == "GREETING":
+        st.write("Hello! 👋 Please ask a question related to the uploaded document.")
+        st.stop()
+
+    # 2️⃣ Retrieve context
+    bm25_chunks = bm25_retriever.retrieve(user_input, top_k=TOP_K)
+    vector_chunks = vector_memory.retrieve_topk(user_input, top_k=TOP_K)
+
+    # Merge + deduplicate
+    context_chunks = list(dict.fromkeys(bm25_chunks + vector_chunks))
+
+    # 3️⃣ Guardrail: context validation
+    valid, msg = validate_context(context_chunks, [])
+    if not valid:
+        answer = msg
     else:
-        # Retrieve context
-        bm25_chunks = bm25_retriever.retrieve(user_input, top_k=TOP_K)
-        vector_chunks = vector_memory.retrieve_topk(user_input, top_k=TOP_K)
+        combined_context = "\n\n".join(context_chunks)
 
-        # Merge + deduplicate
-        context_chunks = list(dict.fromkeys(bm25_chunks + vector_chunks))
+        system_prompt = (
+            "You are a strict RAG assistant.\n"
+            "Use ONLY the provided context to answer.\n"
+            "If the answer is not present, say: I don’t know."
+        )
 
-        # Guardrail: context validation
-        if not validate_context(context_chunks):
-            answer = "I don’t know based on the provided document."
-        else:
-            combined_context = "\n\n".join(context_chunks)
+        # 4️⃣ Generate Answer
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": f"Context:\n{combined_context}\n\nQuestion:\n{user_input}"
+                }
+            ],
+            max_tokens=300
+        )
 
-            system_prompt = (
-                "You are a strict RAG assistant.\n"
-                "Use ONLY the provided context to answer.\n"
-                "If the answer is not present, say: I don’t know."
-            )
+        raw_answer = response.choices[0].message.content
 
-            response = client.chat.completions.create(
-                model=LLM_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": f"Context:\n{combined_context}\n\nQuestion:\n{user_input}"
-                    }
-                ],
-                max_tokens=300
-            )
+        # 5️⃣ Output guardrail
+        answer = post_process_answer(raw_answer)
 
-            raw_answer = response.choices[0].message.content
-            answer = post_process_answer(raw_answer, context_chunks)
-
-        st.session_state.history.append(("You", user_input))
-        st.session_state.history.append(("Bot", answer))
+    # 6️⃣ Update chat history
+    st.session_state.history.append(("You", user_input))
+    st.session_state.history.append(("Bot", answer))
 
 # ------------------------
-# Chat history
+# Display chat history
 # ------------------------
 for role, message in st.session_state.history:
     st.markdown(f"**{role}:** {message}")

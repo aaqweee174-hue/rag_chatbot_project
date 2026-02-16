@@ -1,59 +1,66 @@
-# guardrails.py
 import re
 
 # -----------------------------
-# Input Guardrails
+# Greeting Detection
 # -----------------------------
-def validate_user_input(user_input: str) -> bool:
-    """
-    Block prompt injection / empty input
-    """
-    if not user_input or len(user_input.strip()) < 3:
-        return False
+def is_greeting(user_input: str) -> bool:
+    greetings = ["hi", "hello", "hey", "thanks", "thank you"]
+    return user_input.lower().strip() in greetings
+
+
+# -----------------------------
+# Input Validation
+# -----------------------------
+def validate_user_input(user_input: str):
+    if not user_input or len(user_input.strip()) == 0:
+        return False, "Please enter a question."
+
+    if is_greeting(user_input):
+        return True, "GREETING"
 
     blocked_patterns = [
         r"ignore previous instructions",
         r"system prompt",
         r"you are chatgpt",
-        r"jailbreak"
+        r"jailbreak",
+        r"act as"
     ]
 
     for pattern in blocked_patterns:
         if re.search(pattern, user_input.lower()):
-            return False
+            return False, "Your query contains unsafe instructions."
 
-    return True
+    return True, ""
 
 
 # -----------------------------
-# Context Guardrails
+# Context Validation
 # -----------------------------
-def validate_context(context_chunks: list[str]) -> bool:
-    """
-    If no context retrieved → do NOT answer
-    """
+def validate_context(context_chunks, similarity_scores):
     if not context_chunks:
-        return False
+        return False, "I couldn't find relevant information in the document."
 
-    combined_length = sum(len(c) for c in context_chunks)
-    if combined_length < 100:
-        return False
+    if similarity_scores and max(similarity_scores) < 0.3:
+        return False, "The question seems unrelated to the document."
 
-    return True
+    return True, ""
 
 
 # -----------------------------
-# Output Guardrails
+# Output Validation
 # -----------------------------
-def post_process_answer(answer: str, context_chunks: list[str]) -> str:
-    """
-    Final hallucination control
-    """
+def post_process_answer(answer):
     if not answer or len(answer.strip()) < 5:
         return "I don’t know based on the provided document."
 
-    # If model tries to go outside context
-    if "general knowledge" in answer.lower():
-        return "I don’t know based on the provided document."
+    bad_phrases = [
+        "general knowledge",
+        "not in context",
+        "outside the document"
+    ]
 
-    return answer
+    for p in bad_phrases:
+        if p in answer.lower():
+            return "I don’t know based on the provided document."
+
+    return answer 
